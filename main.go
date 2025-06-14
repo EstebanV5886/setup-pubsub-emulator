@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -23,16 +24,19 @@ func main() {
 	if err != nil {
 		log.Fatal("Error getting pwd")
 	}
-	path := filepath.Join(pwd, "../setup-pusbub-emulator/.env")
-	err = godotenv.Load(path)
-	if err != nil {
-		log.Fatal("Error loading .env file")
+	path := filepath.Join(pwd, "../setup-pubsub-emulator/.env")
+	if os.Getenv(app.ENVVAR_ENV) == "local" {
+		err = godotenv.Load(path)
+		if err != nil {
+			log.Fatal("Error loading .env file")
+		}
 	}
+
 	emulatorHost := os.Getenv(app.ENVVAR_EMULATOR_HOST)
 	projectID := os.Getenv(app.ENVVAR_GOOGLE_PROJECT_ID)
-	topicID := os.Getenv(app.ENVVAR_TOPIC_ID)      // Needs to be exported in shell
-	subID := os.Getenv(app.ENVVAR_SUBSCRIPTION_ID) // Needs to be exported in shell
-	dltID := os.Getenv(app.ENVVAR_DLT_TOPIC_ID)    // Needs to be exported in shell
+	topicID := os.Getenv(app.ENVVAR_TOPIC_ID)
+	subID := os.Getenv(app.ENVVAR_SUBSCRIPTION_ID)
+	dltID := os.Getenv(app.ENVVAR_DLT_TOPIC_ID)
 
 	// --- Logger Setup ---
 	logger, logLevel, err := app.NewAppLogger(
@@ -66,6 +70,18 @@ func main() {
 	}
 	if topicID == "" || subID == "" || dltID == "" {
 		log.Fatalln("PUB_SUB_TOPIC_ID, PUB_SUB_SUBSCRIPTION_ID, or DLT_TOPIC_ID environment variable(s) not set.")
+	}
+
+	addr, err := net.ResolveTCPAddr("tcp", emulatorHost)
+	if err != nil {
+		logger.Error("Failed to resolve emulator hostname", slog.Any("error", err))
+		os.Exit(1)
+	}
+
+	err = waitForPubSubEmulator(addr.String(), logger, 30*time.Second)
+	if err != nil {
+		logger.Error("Pub/Sub emulator not ready", slog.Any("error", err))
+		os.Exit(1)
 	}
 
 	client, err := pubsub.NewClient(ctx, projectID)
@@ -142,4 +158,24 @@ func main() {
 	logger.InfoContext(ctx, fmt.Sprintf("PULL subscription '%s' created successfully.", slog.String("subID", subID)))
 
 	logger.InfoContext(ctx, "Pub/Sub emulator setup complete.")
+}
+
+func waitForPubSubEmulator(emulatorHost string, logger *slog.Logger, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+
+	for {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("Pub/Sub emulator did not become available within %s", timeout)
+		}
+
+		conn, err := net.Dial("tcp", emulatorHost)
+		if err == nil {
+			_ = conn.Close()
+			logger.Info("Pub/Sub emulator is ready", slog.String("host", emulatorHost))
+			return nil
+		}
+
+		logger.Debug("Waiting for Pub/Sub emulator to be ready...", slog.String("host", emulatorHost), slog.Any("error", err))
+		time.Sleep(2 * time.Second)
+	}
 }

@@ -46,7 +46,7 @@ docker run --rm -p 8085:8085 google/cloud-sdk:emulators gcloud beta emulators pu
 Or using the gcloud CLI:
 
 ```bash
-gcloud beta emulators pubsub start --host-port=localhost:8085
+gcloud beta emulators pubsub start --host-port=$PUBSUB_EMULATOR_HOST  --project=$PUBSUB_PROJECT_ID
 ```
 
 ### 2. Configure Environment Variables
@@ -77,6 +77,30 @@ Check the emulator logs and the output of the utility to ensure topics and subsc
 - **Push subscriptions are not supported by the Pub/Sub Emulator.** Only pull subscriptions are created.
 - The utility will delete and recreate the subscription if it already exists, ensuring a clean state.
 - Make sure the emulator is running and accessible at the host/port specified in your `.env`.
+- You can create a Makefile to automatize like this one:
+```
+.PHONY: run emulator
+
+# Variables
+PUBSUB_EMULATOR_HOST=localhost:8085
+PUBSUB_PROJECT_ID=my-local-project
+PUB_SUB_TOPIC_ID=topic-id
+PUB_SUB_SUBSCRIPTION_ID=subscription-id
+DLT_TOPIC_ID=dlt-topic-id
+
+run:
+	@echo "Running Go application with environment variables..."
+	PUBSUB_EMULATOR_HOST=$(PUBSUB_EMULATOR_HOST) \
+	PUBSUB_PROJECT_ID=$(PUBSUB_PROJECT_ID) \
+	PUB_SUB_TOPIC_ID=$(PUB_SUB_TOPIC_ID) \
+	PUB_SUB_SUBSCRIPTION_ID=$(PUB_SUB_SUBSCRIPTION_ID) \
+	DLT_TOPIC_ID=$(DLT_TOPIC_ID) \
+	go run main.go
+
+emulator:
+	@echo "Starting Pub/Sub Emulator with Docker..."
+	gcloud beta emulators pubsub start --host-port=localhost:8085
+```
 
 ## Project Structure
 
