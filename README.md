@@ -109,7 +109,7 @@ setup-pusbub-emulator/
 ├── main.go
 ├── .env
 ├── credentials/
-│   └── tech-spec-logisitcs-1dbe95df92ff.json
+│   └── project.json
 └── app/
     └── ... (logger and constants)
 ```
