@@ -37,6 +37,10 @@ func main() {
 	topicID := os.Getenv(app.ENVVAR_TOPIC_ID)
 	subID := os.Getenv(app.ENVVAR_SUBSCRIPTION_ID)
 	dltID := os.Getenv(app.ENVVAR_DLT_TOPIC_ID)
+	certTopicID := os.Getenv(app.ENVVAR_CERTIFICATE_TOPIC_ID)
+	certSubID := os.Getenv(app.ENVVAR_CERTIFICATE_SUBSCRIPTION_ID)
+	notificationTopic := os.Getenv(app.ENVVAR_NOTIFICATION_TOPIC_ID)
+	notificationSub := os.Getenv(app.ENVVAR_NOTIFICATION_SUBSCRIPTION_ID)
 
 	// --- Logger Setup ---
 	logger, logLevel, err := app.NewAppLogger(
@@ -70,6 +74,9 @@ func main() {
 	}
 	if topicID == "" || subID == "" || dltID == "" {
 		log.Fatalln("PUB_SUB_TOPIC_ID, PUB_SUB_SUBSCRIPTION_ID, or DLT_TOPIC_ID environment variable(s) not set.")
+	}
+	if certTopicID == "" || certSubID == "" {
+		log.Fatalln("PUB_SUB_CERTIFICATE_TOPIC_ID or PUB_SUB_CERTIFICATE_SUBSCRIPTION_ID environment variable(s) not set.")
 	}
 
 	addr, err := net.ResolveTCPAddr("tcp", emulatorHost)
@@ -158,6 +165,110 @@ func main() {
 	logger.InfoContext(ctx, fmt.Sprintf("PULL subscription '%s' created successfully.", slog.String("subID", subID)))
 
 	logger.InfoContext(ctx, "Pub/Sub emulator setup complete.")
+
+	// --- Certificate Topic and Subscription Setup ---
+	// --- 1. Create Certificate Topic ---
+	logger.InfoContext(ctx, fmt.Sprintf("Creating certificate topic '%s'...", slog.String("certTopicID", certTopicID)))
+	certTopic := client.Topic(certTopicID)
+	exists, err = certTopic.Exists(ctx)
+	if err != nil {
+		log.Fatalf("Failed to check certificate topic existence: %v", err)
+	}
+	if exists {
+		logger.WarnContext(ctx, fmt.Sprintf("Certificate topic '%s' already exists.", slog.String("certTopicID", certTopicID)))
+	} else {
+		_, err = client.CreateTopic(ctx, certTopicID)
+		if err != nil {
+			log.Fatalf("Failed to create certificate topic '%s': %v", certTopicID, err)
+		}
+		logger.InfoContext(ctx, fmt.Sprintf("Certificate topic '%s' created successfully.", slog.String("certTopicID", certTopicID)))
+	}
+
+	// --- 2. Create Certificate Pull Subscription ---
+	logger.InfoContext(ctx, fmt.Sprintf("Creating PULL subscription '%s' to certificate topic '%s'...", slog.String("certSubID", certSubID), slog.String("certTopicID", certTopicID)))
+
+	certSub := client.Subscription(certSubID)
+	exists, err = certSub.Exists(ctx)
+	if err != nil {
+		log.Fatalf("Failed to check certificate subscription existence: %v", err)
+	}
+	if exists {
+		logger.WarnContext(ctx, fmt.Sprintf("Certificate subscription '%s' already exists. Deleting and recreating for fresh config.", slog.String("certSubID", certSubID)))
+		if err := certSub.Delete(ctx); err != nil {
+			log.Fatalf("Failed to delete existing certificate subscription '%s': %v", certSubID, err)
+		}
+		logger.InfoContext(ctx, fmt.Sprintf("Existing certificate subscription '%s' deleted.", slog.String("certSubID", certSubID)))
+	}
+
+	certSubConfig := pubsub.SubscriptionConfig{
+		Topic:       certTopic,
+		AckDeadline: 60 * time.Second, // Max time for worker to acknowledge
+		DeadLetterPolicy: &pubsub.DeadLetterPolicy{
+			DeadLetterTopic:     dltTopic.String(),
+			MaxDeliveryAttempts: 10,
+		},
+	}
+
+	_, err = client.CreateSubscription(ctx, certSubID, certSubConfig)
+	if err != nil {
+		log.Fatalf("Failed to create certificate push subscription '%s': %v", certSubID, err)
+	}
+	logger.InfoContext(ctx, fmt.Sprintf("PULL certificate subscription '%s' created successfully.", slog.String("certSubID", certSubID)))
+
+	logger.InfoContext(ctx, "Pub/Sub emulator certificate setup complete.")
+
+	// --- Create Notifications Topic and Subscription Setup ---
+	// --- 1. Create Notifications Topic ---
+	notificationsTopicID := notificationTopic
+	logger.InfoContext(ctx, fmt.Sprintf("Creating notifications topic '%s'...", slog.String("notificationsTopicID", notificationsTopicID)))
+	notificationsTopic := client.Topic(notificationsTopicID)
+	exists, err = notificationsTopic.Exists(ctx)
+	if err != nil {
+		log.Fatalf("Failed to check notifications topic existence: %v", err)
+	}
+	if exists {
+		logger.WarnContext(ctx, fmt.Sprintf("Notifications topic '%s' already exists.", slog.String("notificationsTopicID", notificationsTopicID)))
+	} else {
+		_, err = client.CreateTopic(ctx, notificationsTopicID)
+		if err != nil {
+			log.Fatalf("Failed to create notifications topic '%s': %v", notificationsTopicID, err)
+		}
+		logger.InfoContext(ctx, fmt.Sprintf("Notifications topic '%s' created successfully.", slog.String("notificationsTopicID", notificationsTopicID)))
+	}
+
+	// --- 2. Create Notifications Pull Subscription ---
+	notificationsSubID := notificationSub
+	logger.InfoContext(ctx, fmt.Sprintf("Creating PULL subscription '%s' to notifications topic '%s'...", slog.String("notificationsSubID", notificationsSubID), slog.String("notificationsTopicID", notificationsTopicID)))
+
+	notificationsSub := client.Subscription(notificationsSubID)
+	exists, err = notificationsSub.Exists(ctx)
+	if err != nil {
+		log.Fatalf("Failed to check notifications subscription existence: %v", err)
+	}
+	if exists {
+		logger.WarnContext(ctx, fmt.Sprintf("Notifications subscription '%s' already exists. Deleting and recreating for fresh config.", slog.String("notificationsSubID", notificationsSubID)))
+		if err := notificationsSub.Delete(ctx); err != nil {
+			log.Fatalf("Failed to delete existing notifications subscription '%s': %v", notificationsSubID, err)
+		}
+		logger.InfoContext(ctx, fmt.Sprintf("Existing notifications subscription '%s' deleted.", slog.String("notificationsSubID", notificationsSubID)))
+	}
+
+	notificationsSubConfig := pubsub.SubscriptionConfig{
+		Topic:       notificationsTopic,
+		AckDeadline: 60 * time.Second, // Max time for worker to acknowledge
+		DeadLetterPolicy: &pubsub.DeadLetterPolicy{
+			DeadLetterTopic:     dltTopic.String(),
+			MaxDeliveryAttempts: 10,
+		},
+	}
+
+	_, err = client.CreateSubscription(ctx, notificationsSubID, notificationsSubConfig)
+	if err != nil {
+		log.Fatalf("Failed to create notifications push subscription '%s': %v", notificationsSubID, err)
+	}
+	logger.InfoContext(ctx, fmt.Sprintf("PULL notifications subscription '%s' created successfully.", slog.String("notificationsSubID", notificationsSubID)))
+
+	logger.InfoContext(ctx, "Pub/Sub emulator notifications setup complete.")
 }
 
 func waitForPubSubEmulator(emulatorHost string, logger *slog.Logger, timeout time.Duration) error {
